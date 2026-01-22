@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output directories
+inputs/
+json/
+usd/
+logs/
+
+# Omniverse
+.thumbs/
+*.usda~
+*.usd~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# API Keys and Settings
+.env
+credentials.json
+.claude/settings.local.json
+**/.claude/settings.local.json
+**/extension_settings.json
+**/asset_rotation_offsets.json
