@@ -69,14 +69,24 @@ async def step2_generate_json(
 **Returns**:
 - `(layout_json, stats)`
 
-**Layout JSON (extended)**:
+**Layout JSON (multi-room preferred)**:
+- `house_name` (str, optional)
+- `area_size_X` / `area_size_Y` (number, meters, optional reference)
+- `rooms` (list): list of rooms, each with
+  - `room_name` (str)
+  - `room_type` (str, optional)
+  - `room_polygon` (list): ordered XY points for room outline
+  - `windows` (list, optional): window openings on that room's walls
+  - `area_objects_list` (list): furniture/door/etc objects (global XY)
+- `openings` (list, optional): global door/window openings with
+  `type`, `X`, `Y`, `Width`, `Height`, `SillHeight`
+
+**Legacy single-room schema (still supported)**:
 - `area_name` (str)
 - `area_size_X` / `area_size_Y` (number, meters)
-- `room_polygon` (list, optional): ordered XY points for the room outline, e.g.
-  `[{ "X": 0.0, "Y": 0.0 }, { "X": 4.0, "Y": 0.0 }, ...]`
-- `windows` (list, optional): window openings placed on walls, e.g.
-  `[{ "X": 1.2, "Y": 2.0, "Width": 1.2, "Height": 1.0, "SillHeight": 0.9 }]`
-- `area_objects_list` (list): furniture/door/etc objects for USD Search placement
+- `room_polygon` (list, optional)
+- `windows` (list, optional)
+- `area_objects_list` (list)
 
 **Example**:
 ```python

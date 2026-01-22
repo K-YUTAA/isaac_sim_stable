@@ -129,40 +129,37 @@ Controlled via `non_interactive=True` parameter.
 
 ### JSON Schema
 
+**Multi-room schema (preferred)**:
+
 ```json
 {
-  "area_name": "LivingRoom",
-  "area_size_X": 5.0,
-  "area_size_Y": 6.0,
-  "room_polygon": [
-    { "X": -2.5, "Y": -3.0 },
-    { "X": 2.5, "Y": -3.0 },
-    { "X": 2.5, "Y": 3.0 },
-    { "X": -2.5, "Y": 3.0 }
-  ],
-  "windows": [
-    { "X": 1.2, "Y": 3.0, "Width": 1.2, "Height": 1.0, "SillHeight": 0.9 }
-  ],
-  "area_objects_list": [
+  "house_name": "Apartment",
+  "area_size_X": 10.0,
+  "area_size_Y": 8.0,
+  "rooms": [
     {
-      "object_name": "Sofa",
-      "X": 1.2,
-      "Y": 0.8,
-      "Length": 2.0,
-      "Width": 0.9,
-      "Height": 0.8
-    },
-    {
-      "object_name": "Coffee_Table",
-      "X": 1.2,
-      "Y": 1.6,
-      "Length": 1.2,
-      "Width": 0.6,
-      "Height": 0.45
+      "room_name": "LivingRoom",
+      "room_polygon": [
+        { "X": -2.5, "Y": -3.0 },
+        { "X": 2.5, "Y": -3.0 },
+        { "X": 2.5, "Y": 3.0 },
+        { "X": -2.5, "Y": 3.0 }
+      ],
+      "windows": [
+        { "X": 1.2, "Y": 3.0, "Width": 1.2, "Height": 1.0, "SillHeight": 0.9 }
+      ],
+      "area_objects_list": [
+        { "object_name": "Sofa", "X": 1.2, "Y": 0.8, "Length": 2.0, "Width": 0.9, "Height": 0.8 }
+      ]
     }
+  ],
+  "openings": [
+    { "type": "door", "X": 0.0, "Y": -3.0, "Width": 0.9, "Height": 2.1, "SillHeight": 0.0 }
   ]
 }
 ```
+
+**Legacy single-room schema** is still supported.
 
 ### Coordinate System
 

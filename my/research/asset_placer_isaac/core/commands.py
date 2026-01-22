@@ -199,6 +199,7 @@ class CommandsMixin:
 
             area_size_x = self._extract_optional_float(layout_json, "area_size_X") if isinstance(layout_json, dict) else None
             area_size_y = self._extract_optional_float(layout_json, "area_size_Y") if isinstance(layout_json, dict) else None
+            rooms = self._extract_rooms(layout_json) if isinstance(layout_json, dict) else []
             polygon = self._extract_room_polygon(layout_json)
             polygon_bbox = None
             if polygon:
@@ -274,7 +275,37 @@ class CommandsMixin:
             lines.append("[Room Size]")
             lines.append(f"area_size_X: {area_size_x}")
             lines.append(f"area_size_Y: {area_size_y}")
-            if polygon_bbox:
+            if rooms:
+                lines.append(f"room_count: {len(rooms)}")
+                for idx, room in enumerate(rooms):
+                    room_name = self._extract_room_name(room, idx)
+                    room_polygon = self._extract_room_polygon_from_room(room)
+                    room_bbox = None
+                    if room_polygon:
+                        xs: List[float] = []
+                        ys: List[float] = []
+                        for pt in room_polygon:
+                            if isinstance(pt, dict):
+                                x_val = self._extract_optional_float_by_keys(pt, ["X", "x"])
+                                y_val = self._extract_optional_float_by_keys(pt, ["Y", "y"])
+                                if x_val is not None:
+                                    xs.append(float(x_val))
+                                if y_val is not None:
+                                    ys.append(float(y_val))
+                        if xs and ys:
+                            room_bbox = {
+                                "min_x": min(xs),
+                                "max_x": max(xs),
+                                "min_y": min(ys),
+                                "max_y": max(ys),
+                                "size_x": max(xs) - min(xs),
+                                "size_y": max(ys) - min(ys),
+                            }
+                    if room_bbox:
+                        lines.append(f"room[{idx}] {room_name} bbox: {json.dumps(room_bbox, ensure_ascii=False)}")
+                    else:
+                        lines.append(f"room[{idx}] {room_name} bbox: None")
+            elif polygon_bbox:
                 lines.append(f"room_polygon_bbox: {json.dumps(polygon_bbox, ensure_ascii=False)}")
                 lines.append(f"room_polygon_points: {json.dumps(polygon, ensure_ascii=False)}")
             lines.append("")
@@ -709,6 +740,39 @@ class CommandsMixin:
         layout_copy = json.loads(json.dumps(layout_data))
         self._search_task = asyncio.ensure_future(self._search_and_place_assets(layout_copy))
 
+    @staticmethod
+    def _looks_like_object_list(value: object) -> bool:
+        if not isinstance(value, list):
+            return False
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if any(
+                key in item
+                for key in (
+                    "object_name",
+                    "category",
+                    "search_prompt",
+                    "Length",
+                    "Width",
+                    "Height",
+                    "rotationZ",
+                )
+            ):
+                return True
+        return False
+
+    @staticmethod
+    def _looks_like_room_list(value: object) -> bool:
+        if not isinstance(value, list):
+            return False
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            if "room_polygon" in item or "room_name" in item or "room" in item:
+                return True
+        return False
+
     def _extract_layout_objects(self, layout_data) -> List[Dict[str, object]]:
         """レイアウトデータから配置対象のオブジェクトリストを抽出する。"""
         if isinstance(layout_data, list):
@@ -726,15 +790,16 @@ class CommandsMixin:
         ]
         for key in candidate_keys:
             value = layout_data.get(key)
-            if isinstance(value, list):
+            if self._looks_like_object_list(value):
                 return [obj for obj in value if isinstance(obj, dict)]
 
         # 一部のJSONでは layout_data["layout"]["objects"] のようにネストされることがある
         for value in layout_data.values():
             if isinstance(value, list):
-                filtered = [obj for obj in value if isinstance(obj, dict)]
-                if filtered:
-                    return filtered
+                if self._looks_like_room_list(value):
+                    continue
+                if self._looks_like_object_list(value):
+                    return [obj for obj in value if isinstance(obj, dict)]
             elif isinstance(value, dict):
                 nested = self._extract_layout_objects(value)
                 if nested:
@@ -758,6 +823,42 @@ class CommandsMixin:
                 nested = self._extract_room_polygon(value)
                 if nested:
                     return nested
+        return []
+
+    def _extract_rooms(self, layout_data) -> List[Dict[str, object]]:
+        if not isinstance(layout_data, dict):
+            return []
+        candidate_keys = ["rooms", "room_list", "areas", "room_objects", "room_data"]
+        for key in candidate_keys:
+            value = layout_data.get(key)
+            if isinstance(value, list):
+                rooms = [room for room in value if isinstance(room, dict)]
+                if rooms:
+                    return rooms
+        return []
+
+    def _extract_room_name(self, room_data: Dict[str, object], index: int) -> str:
+        name = str(room_data.get("room_name") or room_data.get("name") or room_data.get("area_name") or "").strip()
+        return name or f"Room_{index + 1}"
+
+    def _extract_room_polygon_from_room(self, room_data: Dict[str, object]) -> List[object]:
+        if not isinstance(room_data, dict):
+            return []
+        candidate_keys = ["room_polygon", "polygon", "room_outline", "area_polygon", "outline"]
+        for key in candidate_keys:
+            value = room_data.get(key)
+            if isinstance(value, list):
+                return value
+        return []
+
+    def _extract_room_windows(self, room_data: Dict[str, object]) -> List[Dict[str, object]]:
+        if not isinstance(room_data, dict):
+            return []
+        candidate_keys = ["windows", "window_list", "window_objects", "window_positions"]
+        for key in candidate_keys:
+            value = room_data.get(key)
+            if isinstance(value, list):
+                return [obj for obj in value if isinstance(obj, dict)]
         return []
 
     def _extract_window_objects(self, layout_data) -> List[Dict[str, object]]:
@@ -834,36 +935,89 @@ class CommandsMixin:
                     if _flip_rotation_entry(obj):
                         flipped = True
         elif isinstance(layout_data, dict):
-            objects = self._extract_layout_objects(layout_data)
-            for obj in objects:
-                if not isinstance(obj, dict):
-                    continue
-                if _flip_x_entry(obj):
+            if "area_size_X" in layout_data:
+                try:
+                    layout_data["area_size_X"] = float(layout_data["area_size_X"]) * -1.0
                     flipped = True
-                if _flip_rotation_entry(obj):
-                    flipped = True
+                except (TypeError, ValueError):
+                    pass
 
-            windows = self._extract_window_objects(layout_data)
-            for window in windows:
-                if isinstance(window, dict) and _flip_x_entry(window):
-                    flipped = True
+            rooms = self._extract_rooms(layout_data)
+            if rooms:
+                for room in rooms:
+                    objects = self._extract_layout_objects(room)
+                    for obj in objects:
+                        if not isinstance(obj, dict):
+                            continue
+                        if _flip_x_entry(obj):
+                            flipped = True
+                        if _flip_rotation_entry(obj):
+                            flipped = True
 
-            polygon = self._extract_room_polygon(layout_data)
-            if isinstance(polygon, list):
-                for idx, point in enumerate(list(polygon)):
-                    if isinstance(point, dict):
-                        if _flip_x_entry(point):
+                    windows = self._extract_room_windows(room)
+                    for window in windows:
+                        if isinstance(window, dict) and _flip_x_entry(window):
                             flipped = True
-                    elif isinstance(point, list) and len(point) >= 2:
-                        new_x = _negate(point[0])
-                        if new_x is not None:
-                            point[0] = new_x
-                            flipped = True
-                    elif isinstance(point, tuple) and len(point) >= 2:
-                        new_x = _negate(point[0])
-                        if new_x is not None:
-                            polygon[idx] = (new_x, *point[1:])
-                            flipped = True
+
+                    room_openings = room.get("openings")
+                    if isinstance(room_openings, list):
+                        for opening in room_openings:
+                            if isinstance(opening, dict) and _flip_x_entry(opening):
+                                flipped = True
+
+                    polygon = self._extract_room_polygon_from_room(room)
+                    if isinstance(polygon, list):
+                        for idx, point in enumerate(list(polygon)):
+                            if isinstance(point, dict):
+                                if _flip_x_entry(point):
+                                    flipped = True
+                            elif isinstance(point, list) and len(point) >= 2:
+                                new_x = _negate(point[0])
+                                if new_x is not None:
+                                    point[0] = new_x
+                                    flipped = True
+                            elif isinstance(point, tuple) and len(point) >= 2:
+                                new_x = _negate(point[0])
+                                if new_x is not None:
+                                    polygon[idx] = (new_x, *point[1:])
+                                    flipped = True
+            else:
+                objects = self._extract_layout_objects(layout_data)
+                for obj in objects:
+                    if not isinstance(obj, dict):
+                        continue
+                    if _flip_x_entry(obj):
+                        flipped = True
+                    if _flip_rotation_entry(obj):
+                        flipped = True
+
+                windows = self._extract_window_objects(layout_data)
+                for window in windows:
+                    if isinstance(window, dict) and _flip_x_entry(window):
+                        flipped = True
+
+                polygon = self._extract_room_polygon(layout_data)
+                if isinstance(polygon, list):
+                    for idx, point in enumerate(list(polygon)):
+                        if isinstance(point, dict):
+                            if _flip_x_entry(point):
+                                flipped = True
+                        elif isinstance(point, list) and len(point) >= 2:
+                            new_x = _negate(point[0])
+                            if new_x is not None:
+                                point[0] = new_x
+                                flipped = True
+                        elif isinstance(point, tuple) and len(point) >= 2:
+                            new_x = _negate(point[0])
+                            if new_x is not None:
+                                polygon[idx] = (new_x, *point[1:])
+                                flipped = True
+
+            openings = layout_data.get("openings")
+            if isinstance(openings, list):
+                for opening in openings:
+                    if isinstance(opening, dict) and _flip_x_entry(opening):
+                        flipped = True
 
         return flipped
 
@@ -971,6 +1125,64 @@ class CommandsMixin:
         }
 
     @staticmethod
+    def _normalize_polygon_points(points: List[object]) -> List[Tuple[float, float]]:
+        normalized: List[Tuple[float, float]] = []
+        for entry in points or []:
+            if isinstance(entry, dict):
+                x = entry.get("X", entry.get("x"))
+                y = entry.get("Y", entry.get("y"))
+            elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                x, y = entry[0], entry[1]
+            else:
+                continue
+            try:
+                normalized.append((float(x), float(y)))
+            except (TypeError, ValueError):
+                continue
+
+        if len(normalized) >= 2:
+            first = normalized[0]
+            last = normalized[-1]
+            if abs(first[0] - last[0]) < 1e-6 and abs(first[1] - last[1]) < 1e-6:
+                normalized.pop()
+        return normalized
+
+    def _collect_room_edges(self, rooms: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        edge_map: Dict[Tuple[Tuple[float, float], Tuple[float, float]], Dict[str, object]] = {}
+
+        def _edge_key(p0: Tuple[float, float], p1: Tuple[float, float], precision: int = 3):
+            a = (round(p0[0], precision), round(p0[1], precision))
+            b = (round(p1[0], precision), round(p1[1], precision))
+            return tuple(sorted([a, b]))
+
+        for index, room in enumerate(rooms):
+            polygon = self._extract_room_polygon_from_room(room)
+            points = self._normalize_polygon_points(polygon)
+            if len(points) < 2:
+                continue
+            for i in range(len(points)):
+                p0 = points[i]
+                p1 = points[(i + 1) % len(points)]
+                if abs(p0[0] - p1[0]) < 1e-6 and abs(p0[1] - p1[1]) < 1e-6:
+                    continue
+                key = _edge_key(p0, p1)
+                if key in edge_map:
+                    edge_map[key]["shared"] = True
+                    continue
+                edge_map[key] = {"start": p0, "end": p1, "shared": False}
+
+        return list(edge_map.values())
+
+    def _get_or_create_room_root(
+        self, stage, parent_path: str, room_name: str, index: int
+    ) -> str:
+        token = self._sanitize_identifier(room_name or f"Room_{index + 1}")
+        room_path = f"{parent_path}/{token}"
+        if not stage.GetPrimAtPath(room_path):
+            UsdGeom.Xform.Define(stage, Sdf.Path(room_path))
+        return room_path
+
+    @staticmethod
     def _build_rectangle_polygon(area_size_x: float, area_size_y: float) -> List[Dict[str, float]]:
         half_x = abs(area_size_x) / 2.0
         half_y = abs(area_size_y) / 2.0
@@ -1046,6 +1258,182 @@ class CommandsMixin:
 
             area_name = layout_data.get("area_name") if isinstance(layout_data, dict) else None
             root_prim_path = self._get_or_create_root_prim(stage, area_name)
+
+            rooms = self._extract_rooms(layout_data)
+            if rooms:
+                omni.log.info(f"Detected {len(rooms)} rooms. Running multi-room placement.")
+                openings: List[Dict[str, object]] = []
+                opening_keys: set = set()
+                door_objects: List[Dict[str, object]] = []
+                window_objects: List[Dict[str, object]] = []
+                room_polygons: List[List[object]] = []
+
+                def _add_opening(opening: Optional[Dict[str, object]]) -> None:
+                    if not opening:
+                        return
+                    try:
+                        key = (
+                            str(opening.get("type", "")),
+                            round(float(opening.get("X", 0.0)), 3),
+                            round(float(opening.get("Y", 0.0)), 3),
+                            round(float(opening.get("Width", 0.0)), 3),
+                            round(float(opening.get("Height", 0.0)), 3),
+                            round(float(opening.get("SillHeight", 0.0)), 3),
+                        )
+                    except (TypeError, ValueError):
+                        key = None
+                    if key and key in opening_keys:
+                        return
+                    if key:
+                        opening_keys.add(key)
+                    openings.append(opening)
+
+                for room_index, room in enumerate(rooms):
+                    room_name = self._extract_room_name(room, room_index)
+                    room_root_path = self._get_or_create_room_root(
+                        stage, root_prim_path, room_name, room_index
+                    )
+                    room_polygon = self._extract_room_polygon_from_room(room)
+                    if not room_polygon:
+                        size_x = self._extract_optional_float_by_keys(room, ["area_size_X", "room_size_X", "size_X"])
+                        size_y = self._extract_optional_float_by_keys(room, ["area_size_Y", "room_size_Y", "size_Y"])
+                        center_x = self._extract_optional_float_by_keys(room, ["center_X", "room_center_X", "centerX"])
+                        center_y = self._extract_optional_float_by_keys(room, ["center_Y", "room_center_Y", "centerY"])
+                        center = room.get("center") if isinstance(room, dict) else None
+                        if isinstance(center, dict):
+                            center_x = center_x if center_x is not None else self._extract_optional_float_by_keys(center, ["X", "x"])
+                            center_y = center_y if center_y is not None else self._extract_optional_float_by_keys(center, ["Y", "y"])
+                        if size_x is not None and size_y is not None:
+                            rect = self._build_rectangle_polygon(float(size_x), float(size_y))
+                            if center_x is not None or center_y is not None:
+                                cx = float(center_x or 0.0)
+                                cy = float(center_y or 0.0)
+                                rect = [{"X": pt["X"] + cx, "Y": pt["Y"] + cy} for pt in rect]
+                            room_polygon = rect
+                            room["room_polygon"] = rect
+                    if room_polygon:
+                        room_polygons.append(room_polygon)
+
+                    room_windows = self._extract_room_windows(room)
+                    objects = self._extract_layout_objects(room)
+                    if not objects:
+                        omni.log.warn(f"Room '{room_name}' has no placeable objects.")
+
+                    floor_generated = False
+                    for index, obj in enumerate(objects):
+                        name = str(obj.get("object_name", "") or "").strip()
+                        category = str(obj.get("category", "") or "").strip()
+                        category_lower = category.lower()
+                        search_prompt = str(obj.get("search_prompt", "") or "").strip()
+
+                        if not (name or category or search_prompt):
+                            omni.log.warn(
+                                f"Skipping object #{index + 1} in room '{room_name}': "
+                                "missing 'object_name', 'category', and 'search_prompt'."
+                            )
+                            skipped += 1
+                            continue
+
+                        if name.lower() == "floor" or category_lower == "floor":
+                            omni.log.info(
+                                f"[Procedural] Generating floor for room '{room_name}' ({index + 1}/{len(objects)})"
+                            )
+                            floor_path = self._create_procedural_floor(stage, room_root_path, obj)
+                            if floor_path:
+                                omni.log.info(f"Generated floor at {floor_path}")
+                                placed += 1
+                                floor_generated = True
+                            else:
+                                skipped += 1
+                            continue
+
+                        if category_lower == "door" or "door" in name.lower():
+                            door_objects.append(obj)
+                            omni.log.info(
+                                f"[Door] Detected door '{name}' in room '{room_name}' at X={obj.get('X', 0)}, Y={obj.get('Y', 0)}"
+                            )
+
+                        if category_lower == "window" or "window" in name.lower():
+                            window_objects.append(obj)
+                            omni.log.info(
+                                f"[Window] Detected window '{name}' in room '{room_name}' at X={obj.get('X', 0)}, Y={obj.get('Y', 0)}"
+                            )
+                            continue
+
+                        search_query = self._build_search_query_from_object(obj)
+                        omni.log.info(
+                            f"[Search] Querying '{search_query}' "
+                            f"(Original name: '{name}', category: '{category}') "
+                            f"({index + 1}/{len(objects)})"
+                        )
+                        try:
+                            asset_url = await self._semantic_search_asset(search_query, normalized_root)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:
+                            omni.log.error(f"Vector search failed for '{name}': {exc}")
+                            skipped += 1
+                            continue
+
+                        if not asset_url:
+                            omni.log.warn(
+                                f"No matching USD asset found for '{name}' (searched as '{search_query}')."
+                            )
+                            skipped += 1
+                            continue
+
+                        prim_path = await self._reference_asset(stage, room_root_path, name, asset_url, obj)
+                        if prim_path:
+                            omni.log.info(f"Placed '{name}' at {prim_path}")
+                            placed += 1
+                        else:
+                            skipped += 1
+
+                        await asyncio.sleep(0)
+
+                    if room_polygon and not floor_generated:
+                        floor_path = self._create_procedural_polygon_floor(stage, room_root_path, room_polygon)
+                        if floor_path:
+                            placed += 1
+
+                    for win in room_windows:
+                        _add_opening(self._normalize_opening_object(win, "window", opening_defaults))
+
+                for door in door_objects:
+                    _add_opening(self._normalize_opening_object(door, "door", opening_defaults))
+                for window in window_objects:
+                    _add_opening(self._normalize_opening_object(window, "window", opening_defaults))
+
+                for opening in layout_data.get("openings", []) if isinstance(layout_data, dict) else []:
+                    if not isinstance(opening, dict):
+                        continue
+                    opening_type = str(opening.get("type", "window") or "window").lower()
+                    if opening_type not in ("window", "door"):
+                        opening_type = "window"
+                    _add_opening(self._normalize_opening_object(opening, opening_type, opening_defaults))
+
+                wall_height = opening_defaults.get("wall_height", 2.5)
+                wall_thickness = opening_defaults.get("wall_thickness", 0.1)
+
+                if room_polygons:
+                    edges = self._collect_room_edges(rooms)
+                    wall_paths, window_paths = self._create_procedural_walls_from_edges(
+                        stage,
+                        root_prim_path,
+                        edges,
+                        openings,
+                        wall_height,
+                        wall_thickness,
+                    )
+                    placed += len(wall_paths) + len(window_paths)
+                    omni.log.info(
+                        f"Generated {len(wall_paths)} wall segments and {len(window_paths)} window panes"
+                    )
+                else:
+                    omni.log.warn("No valid room polygons found; skipping wall generation.")
+
+                omni.log.info(f"USD Search placement finished. Placed={placed}, Skipped={skipped}")
+                return
 
             room_polygon = self._extract_room_polygon(layout_data)
             window_objects = self._extract_window_objects(layout_data)
@@ -1152,6 +1540,15 @@ class CommandsMixin:
                 opening = self._normalize_opening_object(window, "window", opening_defaults)
                 if opening:
                     openings.append(opening)
+            for opening in layout_data.get("openings", []) if isinstance(layout_data, dict) else []:
+                if not isinstance(opening, dict):
+                    continue
+                opening_type = str(opening.get("type", "window") or "window").lower()
+                if opening_type not in ("window", "door"):
+                    opening_type = "window"
+                normalized = self._normalize_opening_object(opening, opening_type, opening_defaults)
+                if normalized:
+                    openings.append(normalized)
 
             wall_height = opening_defaults.get("wall_height", 2.5)
             wall_thickness = opening_defaults.get("wall_thickness", 0.1)
@@ -1706,6 +2103,20 @@ class CommandsMixin:
         """ポリゴン外周から壁と窓ガラスを生成する。"""
         return self._wall_generator.generate_walls_from_polygon(
             stage, root_prim_path, polygon_points, openings or [], wall_height, wall_thickness
+        )
+
+    def _create_procedural_walls_from_edges(
+        self,
+        stage,
+        root_prim_path: str,
+        edges: List[Dict[str, object]],
+        openings: Optional[List[Dict[str, object]]] = None,
+        wall_height: Optional[float] = None,
+        wall_thickness: Optional[float] = None,
+    ) -> Tuple[List[str], List[str]]:
+        """複数部屋のエッジから壁と窓ガラスを生成する。"""
+        return self._wall_generator.generate_walls_from_edges(
+            stage, root_prim_path, edges, openings or [], wall_height, wall_thickness
         )
 
     def _normalize_furniture_name(self, json_name: str) -> str:

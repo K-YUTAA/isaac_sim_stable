@@ -273,6 +273,136 @@ class WallGenerator:
         )
         return wall_paths, window_paths
 
+    def generate_walls_from_edges(
+        self,
+        stage,
+        root_prim_path: str,
+        edges: List[Dict[str, object]],
+        openings: Optional[List[Dict[str, object]]] = None,
+        wall_height: Optional[float] = None,
+        wall_thickness: Optional[float] = None,
+    ) -> Tuple[List[str], List[str]]:
+        """
+        複数部屋のエッジ（開始点/終点）から壁を生成し、開口部を切り抜く。
+        edges: [{ "start": (x,y), "end": (x,y) }, ...]
+        """
+        if not edges:
+            return [], []
+
+        actual_height = wall_height if wall_height is not None else self.DEFAULT_WALL_HEIGHT
+        actual_thickness = wall_thickness if wall_thickness is not None else self.DEFAULT_WALL_THICKNESS
+
+        wall_paths: List[str] = []
+        window_paths: List[str] = []
+        openings = openings or []
+
+        computed_edges: List[Dict[str, object]] = []
+        for idx, edge in enumerate(edges):
+            if not isinstance(edge, dict):
+                continue
+            p0 = edge.get("start")
+            p1 = edge.get("end")
+            if not (isinstance(p0, (list, tuple)) and isinstance(p1, (list, tuple))):
+                continue
+            if len(p0) < 2 or len(p1) < 2:
+                continue
+            try:
+                p0 = (float(p0[0]), float(p0[1]))
+                p1 = (float(p1[0]), float(p1[1]))
+            except (TypeError, ValueError):
+                continue
+            edge_vec = (p1[0] - p0[0], p1[1] - p0[1])
+            edge_len = math.hypot(edge_vec[0], edge_vec[1])
+            if edge_len < 1e-4:
+                continue
+            unit = (edge_vec[0] / edge_len, edge_vec[1] / edge_len)
+            angle_deg = math.degrees(math.atan2(unit[1], unit[0]))
+            computed_edges.append(
+                {
+                    "index": idx,
+                    "start": p0,
+                    "end": p1,
+                    "unit": unit,
+                    "length": edge_len,
+                    "angle": angle_deg,
+                }
+            )
+
+        if not computed_edges:
+            return [], []
+
+        edge_opening_map = self._assign_openings_to_edges(openings, computed_edges)
+
+        for edge_index, edge in enumerate(computed_edges):
+            p0 = edge["start"]
+            unit = edge["unit"]
+            edge_len = edge["length"]
+            angle_deg = edge["angle"]
+
+            edge_openings = edge_opening_map.get(edge_index, [])
+            edge_openings.sort(key=lambda item: item["start"])
+
+            cursor = 0.0
+            for idx, opening in enumerate(edge_openings):
+                start = max(0.0, opening["start"])
+                end = min(edge_len, opening["end"])
+                if start - cursor > 0.05:
+                    segment_name = f"Wall_Edge{edge_index}_Seg{idx}"
+                    path = self._create_oriented_wall_segment(
+                        stage,
+                        root_prim_path,
+                        segment_name,
+                        p0,
+                        unit,
+                        angle_deg,
+                        cursor,
+                        start,
+                        actual_thickness,
+                        actual_height,
+                        actual_height / 2.0,
+                    )
+                    if path:
+                        wall_paths.append(path)
+                cursor = max(cursor, end)
+
+                self._create_opening_segments(
+                    stage,
+                    root_prim_path,
+                    edge_index,
+                    idx,
+                    p0,
+                    unit,
+                    angle_deg,
+                    opening,
+                    actual_thickness,
+                    actual_height,
+                    wall_paths,
+                    window_paths,
+                )
+
+            if edge_len - cursor > 0.05:
+                segment_name = f"Wall_Edge{edge_index}_Tail"
+                path = self._create_oriented_wall_segment(
+                    stage,
+                    root_prim_path,
+                    segment_name,
+                    p0,
+                    unit,
+                    angle_deg,
+                    cursor,
+                    edge_len,
+                    actual_thickness,
+                    actual_height,
+                    actual_height / 2.0,
+                )
+                if path:
+                    wall_paths.append(path)
+
+        omni.log.info(
+            f"Edge-based walls generated: walls={len(wall_paths)}, windows={len(window_paths)}"
+        )
+        return wall_paths, window_paths
+
     @staticmethod
     def _build_edges(points: List[Tuple[float, float]]) -> List[Dict[str, object]]:
         edges: List[Dict[str, object]] = []

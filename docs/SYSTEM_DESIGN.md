@@ -128,29 +128,37 @@ my/research/asset_placer_isaac/
 ### 7.1 スキーマ（要約）
 ```
 {
-  "area_name": string,
-  "area_size_X": number,
-  "area_size_Y": number,
-  "room_polygon": [ { "X": number, "Y": number }, ... ],    // 任意
-  "windows": [ { "X": number, "Y": number, "Width": number, "Height": number, "SillHeight": number } ], // 任意
-  "area_objects_list": [
+  "house_name": string,                        // 任意
+  "area_size_X": number,                       // 任意
+  "area_size_Y": number,                       // 任意
+  "rooms": [
     {
-      "object_name": string,
-      "category": string,
-      "search_prompt": string,
-      "X": number,
-      "Y": number,
-      "Length": number,
-      "Width": number,
-      "Height": number,
-      "rotationZ": number
+      "room_name": string,
+      "room_type": string,                      // 任意
+      "room_polygon": [ { "X": number, "Y": number }, ... ],
+      "windows": [ { "X": number, "Y": number, "Width": number, "Height": number, "SillHeight": number } ], // 任意
+      "area_objects_list": [
+        {
+          "object_name": string,
+          "category": string,
+          "search_prompt": string,
+          "X": number,
+          "Y": number,
+          "Length": number,
+          "Width": number,
+          "Height": number,
+          "rotationZ": number
+        }
+      ]
     }
-  ]
+  ],
+  "openings": [ { "type": "door|window", "X": number, "Y": number, "Width": number, "Height": number, "SillHeight": number } ] // 任意
 }
 ```
+※ 単一部屋の場合は旧スキーマ（area_name / area_objects_list / room_polygon）も許容。
 
 ### 7.2 座標系
-- **X**: 左が +X、右が -X  
+- **X**: 右が +X、左が -X  
 - **Y**: 奥行き（画像上方向が +Y）  
 - **Z**: 上方向（高さ）  
 - **単位**: meters

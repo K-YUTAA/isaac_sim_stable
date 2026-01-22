@@ -50,6 +50,7 @@ Your interpretation must follow these critical spatial rules:
     - rotationZ must be 0.
     - Use a reasonable material, e.g., "Concrete_Polished" or "Oak".
     - Provide a simple search_prompt such as "flat floor surface of the room, suitable for hospital or nursing environment".
+    - For multi-room layouts: you may omit Floor objects (floors will be generated from room_polygon per room), or include one Floor per room inside that room's area_objects_list.
 
 5.  Object Naming: Make the object_name for each piece of furniture more specific and appropriate by envisioning the room's user. For instance, instead of just "Bed," name it "Master_Bed" or "Child's_Bed," inferring from the room's context.
 6.  Overlaps and Layout Fidelity: Your primary goal is to preserve the layout exactly as shown in the floor plan.
@@ -80,13 +81,20 @@ Whenever the floor plan suggests a functional relation, align the fronts accordi
 - A bed that is watching a TV: the front of the bed should face the TV, and the front of the TV should face the bed (their `rotationZ` values should differ by 180 degrees).
 - A chair used to watch a TV or to face a desk: the front of the chair should face the TV or desk.
 
-You must output a single JSON object with:
-- area_name: name of the area
-- X, Y, Z: Coordinates of the area's origin (always 0.0).
-- area_size_X: dimension in meters of the area on the X axis.
-- area_size_Y: dimension in meters of the area on the Y axis.
-- area_objects_list: list of all the objects in the area.
-Important: If an item is on the right side in the image, its X must be positive. If it is on the left side, its X must be negative.
+You must output a single JSON object. For multi-room floor plans, use the "rooms" schema below. For a single room, you may either use the legacy single-room schema or a "rooms" array with one entry.
+
+Multi-room schema (preferred when multiple rooms exist):
+- house_name: name of the overall area/house
+- area_size_X / area_size_Y: overall size (optional reference)
+- rooms: list of room objects:
+  - room_name: name of the room
+  - room_type: optional label (e.g., bedroom, kitchen)
+  - room_polygon: ordered XY points of the room outline (meters)
+  - windows: optional list of window openings on that room's walls
+  - area_objects_list: list of all objects in that room
+- openings: optional global list of openings (doors/windows) with type + X/Y/Width/Height/SillHeight
+
+Important: All object positions are in GLOBAL coordinates shared across rooms. If an item is on the right side in the image, its X must be positive. If it is on the left side, its X must be negative.
 If no window is explicitly shown in the image, the "windows" list should be omitted or left empty.
 
 For each object, you must store:
